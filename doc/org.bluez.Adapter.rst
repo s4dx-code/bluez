@@ -151,6 +151,11 @@ Possible filter values:
 	address or device name which is convenient way to limited the number of
 	device objects created during a discovery.
 
+	Multiple patterns can be given as a comma separated list, e.g.
+	"Samsung, iPhone", in which case a device is discovered
+	if it matches any of them as they work as a logical OR. Spaces
+	surrounding each pattern are ignored.
+
 	When set disregards device discoverable flags.
 
 	Note: The pattern matching is ignored if there are other client that
