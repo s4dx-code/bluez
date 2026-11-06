@@ -689,10 +689,25 @@ static GDBusProxy *find_proxies_by_path(GList *source, const char *path)
 
 static bool filter_match_pattern(const char *pattern)
 {
+	char **patterns, **entry;
+	bool match = false;
+
 	if (!filter.active || !filter.pattern || !pattern)
 		return false;
 
-	return !strcmp(filter.pattern, pattern);
+	/* The pattern filter may hold a comma separated list of patterns */
+	patterns = g_strsplit(filter.pattern, ",", -1);
+
+	for (entry = patterns; *entry; entry++) {
+		if (!strcmp(g_strstrip(*entry), pattern)) {
+			match = true;
+			break;
+		}
+	}
+
+	g_strfreev(patterns);
+
+	return match;
 }
 
 static void property_changed(GDBusProxy *proxy, const char *name,
@@ -1639,8 +1654,13 @@ static void cmd_scan_filter_pattern(int argc, char *argv[])
 		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
 	}
 
-	free(filter.pattern);
-	filter.pattern = strdup(argv[1]);
+	g_free(filter.pattern);
+	/*
+	 * Join the arguments back together so a comma separated list can be
+	 * given with spaces in between, e.g. "Headset, Speaker", without
+	 * requiring it to be quoted.
+	 */
+	filter.pattern = g_strjoinv(" ", &argv[1]);
 
 	filter.set = false;
 
@@ -1706,7 +1726,7 @@ static void filter_clear_discoverable(void)
 
 static void filter_clear_pattern(void)
 {
-	free(filter.pattern);
+	g_free(filter.pattern);
 	filter.pattern = NULL;
 }
 
@@ -2237,7 +2257,7 @@ static void prompt_scan_connect(const char *input, void *user_data)
 	if (!strcmp(input, "yes") || !strcmp(input, "y")) {
 		dbus_bool_t enable = TRUE;
 
-		free(filter.pattern);
+		g_free(filter.pattern);
 		filter.pattern = address;
 		filter.auto_connect = true;
 
@@ -2256,7 +2276,7 @@ static void prompt_scan_connect(const char *input, void *user_data)
 		return;
 	}
 
-	free(address);
+	g_free(address);
 
 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
 }
@@ -2275,7 +2295,7 @@ static void cmd_connect(int argc, char *argv[])
 	if (!proxy) {
 		bt_shell_printf("Device %s not available\n", argv[1]);
 		bt_shell_prompt_input(argv[1], "Scan and connect (yes,no):",
-				      prompt_scan_connect, strdup(argv[1]));
+				      prompt_scan_connect, g_strdup(argv[1]));
 		return;
 	}
 
@@ -3768,7 +3788,7 @@ static const struct bt_shell_menu scan_menu = {
 	{ "discoverable", "[on/off]", cmd_scan_filter_discoverable,
 				"Set/Get discoverable filter",
 				NULL },
-	{ "pattern", "[value]", cmd_scan_filter_pattern,
+	{ "pattern", "[value1, value2, ...]", cmd_scan_filter_pattern,
 				"Set/Get pattern filter",
 				NULL },
 	{ "auto-connect", "[on/off]", cmd_scan_filter_auto_connect,
