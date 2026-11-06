@@ -208,6 +208,7 @@ struct conn_param {
 struct discovery_filter {
 	uint8_t type;
 	char *pattern;
+	char **patterns;
 	uint16_t pathloss;
 	int16_t rssi;
 	GSList *uuids;
@@ -1704,6 +1705,7 @@ static void free_discovery_filter(struct discovery_filter *discovery_filter)
 
 	g_slist_free_full(discovery_filter->uuids, free);
 	free(discovery_filter->pattern);
+	g_strfreev(discovery_filter->patterns);
 	g_free(discovery_filter);
 }
 
@@ -2682,6 +2684,43 @@ static bool parse_discoverable(DBusMessageIter *value,
 	return true;
 }
 
+/*
+ * Splits a pattern filter into its individual patterns, comma is used as
+ * separator and any spaces surrounding a pattern are stripped, so
+ * "Headset, Speaker" results in the patterns "Headset" and "Speaker".
+ *
+ * Returns NULL if no pattern is left, which means match anything, e.g. when an
+ * empty string is set as pattern filter.
+ */
+static char **split_pattern(const char *pattern)
+{
+	char **patterns;
+	unsigned int i, len = 0;
+
+	patterns = g_strsplit(pattern, ",", -1);
+
+	for (i = 0; patterns[i]; i++) {
+		char *str = g_strstrip(patterns[i]);
+
+		/* Drop empty patterns as those would match anything */
+		if (!strlen(str)) {
+			g_free(str);
+			continue;
+		}
+
+		patterns[len++] = str;
+	}
+
+	if (!len) {
+		g_free(patterns);
+		return NULL;
+	}
+
+	patterns[len] = NULL;
+
+	return patterns;
+}
+
 static bool parse_pattern(DBusMessageIter *value,
 					struct discovery_filter *filter)
 {
@@ -2694,6 +2733,9 @@ static bool parse_pattern(DBusMessageIter *value,
 
 	free(filter->pattern);
 	filter->pattern = strdup(pattern);
+
+	g_strfreev(filter->patterns);
+	filter->patterns = split_pattern(pattern);
 
 	return true;
 }
@@ -2767,6 +2809,7 @@ static bool parse_discovery_filter_dict(struct btd_adapter *adapter,
 	(*filter)->discoverable = false;
 	(*filter)->auto_connect = false;
 	(*filter)->pattern = NULL;
+	(*filter)->patterns = NULL;
 
 	dbus_message_iter_init(msg, &iter);
 	if (dbus_message_iter_get_arg_type(&iter) != DBUS_TYPE_ARRAY ||
@@ -2822,8 +2865,7 @@ static bool parse_discovery_filter_dict(struct btd_adapter *adapter,
 	return true;
 
 invalid_args:
-	g_slist_free_full((*filter)->uuids, g_free);
-	g_free(*filter);
+	free_discovery_filter(*filter);
 	*filter = NULL;
 	return false;
 }
@@ -7249,6 +7291,43 @@ static void filter_duplicate_data(void *data, void *user_data)
 	*duplicate = client->discovery_filter->duplicate;
 }
 
+/* Do a prefix match of pattern against both address and name */
+static bool pattern_match(const char *pattern, struct eir_data *eir,
+							const char *addr)
+{
+	size_t pattern_len = strlen(pattern);
+
+	if (!strncasecmp(pattern, addr, pattern_len))
+		return true;
+
+	if (eir->name && !strncmp(pattern, eir->name, pattern_len))
+		return true;
+
+	return false;
+}
+
+/*
+ * A pattern filter may hold a comma separated list of patterns, e.g.
+ * "Headset, Speaker", in which case matching any of them is
+ * enough since they work as a logical OR.
+ */
+static bool filter_pattern_match(struct discovery_filter *filter,
+					struct eir_data *eir, const char *addr)
+{
+	char **pattern;
+
+	/* An empty pattern filter matches anything */
+	if (!filter->patterns)
+		return true;
+
+	for (pattern = filter->patterns; *pattern; pattern++) {
+		if (pattern_match(*pattern, eir, addr))
+			return true;
+	}
+
+	return false;
+}
+
 static bool device_is_discoverable(struct btd_adapter *adapter,
 					struct eir_data *eir, const char *addr,
 					uint8_t bdaddr_type, bool *auto_connect)
@@ -7274,7 +7353,6 @@ static bool device_is_discoverable(struct btd_adapter *adapter,
 	for (l = adapter->discovery_list; l; l = g_slist_next(l)) {
 		struct discovery_client *client = l->data;
 		struct discovery_filter *filter = client->discovery_filter;
-		size_t pattern_len;
 
 		if (!filter || !filter->pattern)
 			continue;
@@ -7282,19 +7360,7 @@ static bool device_is_discoverable(struct btd_adapter *adapter,
 		/* Reset discoverable if a client has a pattern filter */
 		discoverable = false;
 
-		pattern_len = strlen(filter->pattern);
-		if (!pattern_len) {
-			*auto_connect = filter->auto_connect;
-			return true;
-		}
-
-		if (!strncasecmp(filter->pattern, addr, pattern_len)) {
-			*auto_connect = filter->auto_connect;
-			return true;
-		}
-
-		if (eir->name && !strncmp(filter->pattern, eir->name,
-							pattern_len)) {
+		if (filter_pattern_match(filter, eir, addr)) {
 			*auto_connect = filter->auto_connect;
 			return true;
 		}
