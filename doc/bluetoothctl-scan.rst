@@ -183,6 +183,10 @@ Discover devices where the pattern matches either the prefix of the address or
 the device name, which is a convenient way to limit the number of device objects
 created during a discovery.
 
+Multiple patterns can be given as a comma separated list, in which case a device
+is discovered if it matches any of them as they work as a logical OR. Spaces
+surrounding each pattern are ignored.
+
 When set, it disregards device discoverable flags.
 
 :Note: The pattern matching is ignored if there are other clients that don't
@@ -190,7 +194,7 @@ When set, it disregards device discoverable flags.
        string "" pattern will match any device found.
 
 :Usage: **> pattern [value]**
-:[value]: Pattern to match device address prefix or name (optional, shows current if omitted)
+:[value]: Pattern(s) to match device address prefix or name, comma separated (optional, shows current if omitted)
 :Example Show current pattern filter setting:
 	| **> pattern**
 :Example Discover devices with "Samsung" in the name:
@@ -203,6 +207,8 @@ When set, it disregards device discoverable flags.
 	| **> pattern 00:11:22**
 :Example Discover devices with addresses starting with AA:BB:CC:
 	| **> pattern AA:BB:CC**
+:Example Discover devices named "Samsung", "iPhone" or "Headphones":
+	| **> pattern Samsung, iPhone, Headphones**
 :Example Clear pattern filter (match any device):
 	| **> pattern ""**
 
